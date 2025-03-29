@@ -32,8 +32,10 @@ def main():
 
     enter_username = Responder(pattern="Please login: ", response=f"{username}\n")
     enter_password = Responder(pattern="password : ", response=f"{password}\n")
+    confirm_root_shell = Responder(pattern="What's your chow: ", response="\n")
 
-    conn.run("true", watchers=[enter_username, enter_password])
+    # Open the initial root shell
+    conn.run("!v54!", watchers=[enter_username, enter_password, confirm_root_shell])
 
 
 if __name__ == "__main__":

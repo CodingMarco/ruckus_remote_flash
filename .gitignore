@@ -1,3 +1,5 @@
+*.bin
+
 # Created by https://www.toptal.com/developers/gitignore/api/python,virtualenv,visualstudiocode
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,virtualenv,visualstudiocode
 

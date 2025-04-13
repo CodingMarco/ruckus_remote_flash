@@ -50,6 +50,10 @@ class RuckusFlasher:
     def acquire_root_shell(self):
         self.respond_to_prompt("Please login: ", f"{self.username}\n")
         self.respond_to_prompt("password : ", f"{self.password}\n")
+
+        self.respond_to_prompt("rkscli: ", "Ruckus\n")
+        self.shell.send('";/bin/sh;"\n')
+
         self.respond_to_prompt("rkscli: ", "!v54!\n")
         self.respond_to_prompt("What's your chow: ", "\n")
         self.wait_for_prompt(PROMPT_BUSYBOX_ROOT)

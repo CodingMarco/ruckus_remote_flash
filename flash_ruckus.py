@@ -201,7 +201,6 @@ class RuckusFlasher:
                 ]
             )
         )
-        self.send_command_wait("sync")
         self.logger.info("Firmware flashed successfully.")
 
     def set_openwrt_bootaddr(self):
@@ -209,8 +208,12 @@ class RuckusFlasher:
         # Address construction:
         # Memory-mapped flash offset = 0xbf000000
         # Firmware partition offset = 0x40000
-        self.send_command_wait('fw_setenv bootcmd "bootm 0xbf040000"')
+        self.send_command_wait('/mnt/fw_setenv bootcmd "bootm 0xbf040000"')
         self.logger.info("OpenWRT boot address set.")
+
+    def reboot_ap(self):
+        self.logger.info("Rebooting AP...")
+        self.shell.send("reboot\n")
 
     def run(self):
         """
@@ -227,6 +230,7 @@ class RuckusFlasher:
             self.erase_firmware_partition()
             self.set_openwrt_bootaddr()
             self.flash_firmware()
+            self.reboot_ap()
             self.logger.info("Firmware flashing completed successfully.")
         except Exception as e:
             self.logger.error(f"An error occurred: {e}")

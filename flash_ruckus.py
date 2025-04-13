@@ -2,20 +2,26 @@ import time
 import logging
 import argparse
 import paramiko
+import tempfile
+import threading
+import http_server
 from custom_logging import CustomFormatter
+from pathlib import Path
 
 PROMPT_BUSYBOX_ROOT = "# "
 
 
 class RuckusFlasher:
-    def __init__(self, ip, username, password, firmware):
-        self.ip = ip
+    def __init__(self, ip, host_ip, username, password, firmware):
+        self.ap_ip = ip
+        self.host_ip = host_ip
         self.username = username
         self.password = password
-        self.firmware = firmware
+        self.firmware = Path(firmware)
         self.client = None
         self.shell = None
         self.logger = self.setup_logging()
+        self.server_thread = None
 
     def setup_logging(self):
         logger = logging.getLogger("flash_ruckus")
@@ -28,11 +34,11 @@ class RuckusFlasher:
 
     def connect(self):
         """Establish the SSH connection and obtain a BusyBox root shell."""
-        self.logger.info(f"Connecting to {self.ip} as {self.username}...")
+        self.logger.info(f"Connecting to {self.ap_ip} as {self.username}...")
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.client.connect(
-            self.ip,
+            self.ap_ip,
             username=self.username,
             password=self.password,
             allow_agent=False,
@@ -118,6 +124,42 @@ class RuckusFlasher:
         mount_output = self.send_command_wait("mount -t tmpfs tmpfs /mnt")
         self.logger.debug("Output from mount command:\n" + mount_output)
 
+    def copy_files_to_ap(self):
+        script_dir = Path(__file__).resolve().parent
+        fwprintenv_path = script_dir / "fw_printenv"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Copy the firmware file to the temporary directory
+            firmware_path = Path(temp_dir) / self.firmware.name
+            firmware_path.write_bytes(self.firmware.read_bytes())
+            # Copy the fw_printenv script to the temporary directory
+            fwprintenv_path_temp = Path(temp_dir) / "fw_printenv"
+            fwprintenv_path_temp.write_bytes(fwprintenv_path.read_bytes())
+
+            self.server_thread = threading.Thread(
+                target=lambda: http_server.run(temp_dir, 8000), daemon=True
+            )
+            self.server_thread.start()
+            httpd = http_server.server_queue.get()
+
+            self.logger.info(f"Serving files from {temp_dir} on port 8000.")
+            self.logger.info("Copying files to AP...")
+
+            self.send_command_wait(
+                f"wget http://{self.host_ip}:8000/{self.firmware.name} -O /mnt/{self.firmware.name}"
+            )
+            self.send_command_wait(
+                f"wget http://{self.host_ip}:8000/fw_printenv -O /mnt/fw_printenv"
+            )
+            self.send_command_wait("chmod +x /mnt/fw_printenv")
+            self.send_command_wait("ln -s /mnt/fw_printenv /mnt/fw_setenv")
+
+            self.logger.info("Files copied to AP successfully.")
+            self.logger.info("Stopping HTTP server.")
+
+            httpd.server_close()
+            self.logger.info("HTTP server stopped.")
+
     def run(self):
         """
         Execute the sequence:
@@ -129,6 +171,7 @@ class RuckusFlasher:
             self.connect()
             self.acquire_root_shell()
             self.mount_tmpfs_if_needed()
+            self.copy_files_to_ap()
         finally:
             self.disconnect()
 
@@ -137,6 +180,12 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Flash Ruckus AP")
     parser.add_argument(
         "--ip", type=str, default="192.168.0.1", help="IP Address of the AP"
+    )
+    parser.add_argument(
+        "--host-ip",
+        type=str,
+        default="192.168.0.10",
+        help="(static) IP Address of the host",
     )
     parser.add_argument(
         "--username", type=str, default="super", help="Username of the AP"
@@ -155,5 +204,7 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    flasher = RuckusFlasher(args.ip, args.username, args.password, args.firmware)
+    flasher = RuckusFlasher(
+        args.ip, args.host_ip, args.username, args.password, args.firmware
+    )
     flasher.run()

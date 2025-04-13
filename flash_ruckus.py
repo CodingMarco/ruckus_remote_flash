@@ -14,9 +14,10 @@ WHOLE_FLASH_DEVICE = "/dev/mtd0"
 
 
 class RuckusFlasher:
-    def __init__(self, ip, host_ip, username, password, firmware):
+    def __init__(self, ip, host_ip, http_port, username, password, firmware):
         self.ap_ip = ip
         self.host_ip = host_ip
+        self.http_port = http_port
         self.username = username
         self.password = password
         self.firmware = Path(firmware)
@@ -143,21 +144,24 @@ class RuckusFlasher:
             fwprintenv_path_temp.write_bytes(fwprintenv_path.read_bytes())
 
             self.server_thread = threading.Thread(
-                target=lambda: http_server.run(temp_dir, 8000), daemon=True
+                target=lambda: http_server.run(temp_dir, self.http_port), daemon=True
             )
             self.server_thread.start()
             httpd = http_server.server_queue.get()
 
-            self.logger.info(f"Serving files from {temp_dir} on port 8000.")
+            self.logger.info(f"Serving files from {temp_dir} on port {self.http_port}.")
             self.logger.info("Copying files to AP...")
 
             self.send_command_wait(
-                f"wget http://{self.host_ip}:8000/{self.firmware.name} -O /mnt/{self.firmware.name}"
+                f"wget http://{self.host_ip}:{self.http_port}/{self.firmware.name} -O /mnt/{self.firmware.name}"
             )
             self.send_command_wait(
-                f"wget http://{self.host_ip}:8000/fw_printenv -O /mnt/fw_printenv"
+                f"wget http://{self.host_ip}:{self.http_port}/fw_printenv -O /mnt/fw_printenv"
             )
             self.send_command_wait("chmod +x /mnt/fw_printenv")
+
+            # The fw_printenv binary can also write u-boot environment variables
+            # if the binary is named fw_setenv. So we create a symlink to it.
             self.send_command_wait("ln -s /mnt/fw_printenv /mnt/fw_setenv")
 
             self.logger.info("Files copied to AP successfully.")
@@ -243,6 +247,12 @@ def parse_args():
         help="(static) IP Address of the host",
     )
     parser.add_argument(
+        "--http-port",
+        type=int,
+        default=8000,
+        help="Port for the HTTP server to serve files",
+    )
+    parser.add_argument(
         "--username", type=str, default="super", help="Username of the AP"
     )
     parser.add_argument(
@@ -260,6 +270,11 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     flasher = RuckusFlasher(
-        args.ip, args.host_ip, args.username, args.password, args.firmware
+        args.ip,
+        args.host_ip,
+        args.http_port,
+        args.username,
+        args.password,
+        args.firmware,
     )
     flasher.run()

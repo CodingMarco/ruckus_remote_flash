@@ -9,6 +9,8 @@ from custom_logging import CustomFormatter
 from pathlib import Path
 
 PROMPT_BUSYBOX_ROOT = "# "
+FIRMWARE_PARTITION_OFFSET = 0x40000
+WHOLE_FLASH_DEVICE = "/dev/mtd0"
 
 
 class RuckusFlasher:
@@ -164,6 +166,48 @@ class RuckusFlasher:
             httpd.server_close()
             self.logger.info("HTTP server stopped.")
 
+    def erase_firmware_partition(self):
+        self.logger.info("Erasing firmware partition...")
+        firmware_size = self.firmware.stat().st_size
+        self.send_command_wait(
+            " ".join(
+                [
+                    "mtd_debug",
+                    "erase",
+                    WHOLE_FLASH_DEVICE,
+                    str(FIRMWARE_PARTITION_OFFSET),
+                    str(firmware_size),
+                ]
+            )
+        )
+        self.logger.info("Firmware partition erased.")
+
+    def flash_firmware(self):
+        self.logger.info("Flashing firmware...")
+        firmware_size = self.firmware.stat().st_size
+        self.send_command_wait(
+            " ".join(
+                [
+                    "mtd_debug",
+                    "write",
+                    WHOLE_FLASH_DEVICE,
+                    str(FIRMWARE_PARTITION_OFFSET),
+                    str(firmware_size),
+                    "/mnt/" + self.firmware.name,
+                ]
+            )
+        )
+        self.send_command_wait("sync")
+        self.logger.info("Firmware flashed successfully.")
+
+    def set_openwrt_bootaddr(self):
+        self.logger.info("Setting OpenWRT boot address...")
+        # Address construction:
+        # Memory-mapped flash offset = 0xbf000000
+        # Firmware partition offset = 0x40000
+        self.send_command_wait('fw_setenv bootcmd "bootm 0xbf040000"')
+        self.logger.info("OpenWRT boot address set.")
+
     def run(self):
         """
         Execute the sequence:
@@ -176,6 +220,13 @@ class RuckusFlasher:
             self.acquire_root_shell()
             self.mount_tmpfs_if_needed()
             self.copy_files_to_ap()
+            self.erase_firmware_partition()
+            self.set_openwrt_bootaddr()
+            self.flash_firmware()
+            self.logger.info("Firmware flashing completed successfully.")
+        except Exception as e:
+            self.logger.error(f"An error occurred: {e}")
+            self.logger.debug("Traceback:", exc_info=True)
         finally:
             self.disconnect()
 
